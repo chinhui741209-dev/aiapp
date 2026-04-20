@@ -1,0 +1,62 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Gradient (Soft Blue/Indigo) -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4A90E2"/>
+      <stop offset="100%" stop-color="#003399"/>
+    </linearGradient>
+    
+    <!-- Paper Shadow -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="25" stdDeviation="25" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+    
+    <!-- Checkmark Shadow -->
+    <filter id="checkShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="15" stdDeviation="15" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- App Icon Rounded Background -->
+  <rect width="1024" height="1024" fill="url(#bgGradient)"/>
+
+  <!-- Paper Document -->
+  <rect x="232" y="152" width="560" height="720" rx="40" fill="#ffffff" filter="url(#shadow)"/>
+  
+  <!-- Header Line -->
+  <rect x="312" y="240" width="200" height="24" rx="12" fill="#E2E8F0"/>
+  <rect x="652" y="240" width="60" height="24" rx="12" fill="#E2E8F0"/>
+  <line x1="312" y1="290" x2="712" y2="290" stroke="#E2E8F0" stroke-width="4"/>
+
+  <!-- Bubble Options (A, B, C, D concept) -->
+  <!-- Q1 -->
+  <rect x="312" y="340" width="40" height="16" rx="8" fill="#E2E8F0"/>
+  <circle cx="410" cy="348" r="24" fill="#E2E8F0"/>
+  <circle cx="490" cy="348" r="24" fill="#4A90E2"/> <!-- Selected -->
+  <circle cx="570" cy="348" r="24" fill="#E2E8F0"/>
+  <circle cx="650" cy="348" r="24" fill="#E2E8F0"/>
+
+  <!-- Q2 -->
+  <rect x="312" y="440" width="40" height="16" rx="8" fill="#E2E8F0"/>
+  <circle cx="410" cy="448" r="24" fill="#E2E8F0"/>
+  <circle cx="490" cy="448" r="24" fill="#E2E8F0"/>
+  <circle cx="570" cy="448" r="24" fill="#4A90E2"/> <!-- Selected -->
+  <circle cx="650" cy="448" r="24" fill="#E2E8F0"/>
+
+  <!-- Q3 -->
+  <rect x="312" y="540" width="40" height="16" rx="8" fill="#E2E8F0"/>
+  <circle cx="410" cy="548" r="24" fill="#E2E8F0"/>
+  <circle cx="490" cy="548" r="24" fill="#E2E8F0"/>
+  <circle cx="570" cy="548" r="24" fill="#E2E8F0"/>
+  <circle cx="650" cy="548" r="24" fill="#4A90E2"/> <!-- Selected -->
+  
+  <!-- Q4 -->
+  <rect x="312" y="640" width="40" height="16" rx="8" fill="#E2E8F0"/>
+  <circle cx="410" cy="648" r="24" fill="#4A90E2"/> <!-- Selected -->
+  <circle cx="490" cy="648" r="24" fill="#E2E8F0"/>
+  <circle cx="570" cy="648" r="24" fill="#E2E8F0"/>
+  <circle cx="650" cy="648" r="24" fill="#E2E8F0"/>
+
+  <!-- Giant Green Checkmark overlaying everything -->
+  <path d="M 450 680 L 580 810 L 880 420" fill="none" stroke="#22C55E" stroke-width="64" stroke-linecap="round" stroke-linejoin="round" filter="url(#checkShadow)"/>
+</svg>
