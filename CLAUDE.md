@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**AnswerChecker** (對答案小工具) is an iOS app for teachers to check student answer sheets. It supports up to 70 multiple-choice questions and open-ended "writing" questions. The teacher enters an answer key, pastes the student's answers in a structured text format, and the app produces a correction summary.
+**AnswerChecker** (對答案小工具) is an iOS app for teachers to check student answer sheets. It supports up to 100 multiple-choice questions and open-ended "writing" questions. The teacher enters an answer key, pastes the student's answers in a structured text format, and the app produces a correction summary.
 
 ## Build & Run
 
@@ -29,7 +29,7 @@ Everything lives in a single `ContentView.swift` file organized by `// MARK:` se
 
 ### Key Data Structures
 
-- **`choiceKey: [String]`** — 70-element array, index 0 = Q1. Values are normalized answer strings (e.g. `"AC"`).
+- **`choiceKey: [String]`** — 100-element array, index 0 = Q1. Values are normalized answer strings (e.g. `"AC"`).
 - **`WritingKeyItem`** — `Identifiable/Codable` struct: `question: Int`, `answer: String`. Stored as `writingKeyItems: [WritingKeyItem]`.
 - **`StudentSubmission`** — transient struct: `headerLine: String` (first line = student name/subject), `answers: [Int: String]` (question number → answer).
 

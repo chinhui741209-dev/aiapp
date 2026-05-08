@@ -12,15 +12,15 @@ struct ContentView: View {
     // MARK: Steps
     @State private var step: Int = 1
 
-    // MARK: Step1：選擇題標準答案（01-70）
-    private let totalChoiceQuestions = 70
+    // MARK: Step1：選擇題標準答案（01-100）
+    private let totalChoiceQuestions = 100
     private let cols = 10
-    private var rows: Int { totalChoiceQuestions / cols } // 7
+    private var rows: Int { totalChoiceQuestions / cols } // 10
 
     // ✅ 永久保存（除非按清空）
     @AppStorage("AnswerChecker.choiceKeyJSON") private var choiceKeyJSON: String = ""
 
-    @State private var choiceKey: [String] = Array(repeating: "", count: 70)
+    @State private var choiceKey: [String] = Array(repeating: "", count: 100)
     @FocusState private var focusedChoiceIndex: Int?
 
     // MARK: Step2：學生貼上
