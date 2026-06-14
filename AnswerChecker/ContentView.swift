@@ -7,6 +7,13 @@ struct StudentSubmission {
     var answers: [Int: String] = [:]        // 題號 -> "A"/"AC"
 }
 
+// MARK: - 一組具名標準答案
+struct AnswerSet: Identifiable, Codable, Equatable {
+    var id: UUID = UUID()
+    var name: String
+    var choiceKey: [String]                 // 100 元素，index 0 = Q1
+}
+
 // MARK: - 主畫面
 struct ContentView: View {
     // MARK: Steps
@@ -18,10 +25,35 @@ struct ContentView: View {
     private var rows: Int { totalChoiceQuestions / cols } // 10
 
     // ✅ 永久保存（除非按清空）
+    // 舊版單組 key（僅供遷移用）
     @AppStorage("AnswerChecker.choiceKeyJSON") private var choiceKeyJSON: String = ""
+    // 多組答案
+    @AppStorage("AnswerChecker.answerSetsJSON") private var answerSetsJSON: String = ""
+    @AppStorage("AnswerChecker.selectedSetID") private var selectedSetIDString: String = ""
 
-    @State private var choiceKey: [String] = Array(repeating: "", count: 100)
+    @State private var answerSets: [AnswerSet] = []
+    @State private var selectedSetID: UUID = UUID()
     @FocusState private var focusedChoiceIndex: Int?
+
+    // 目前選中那組在陣列中的索引（永遠保持至少一組）
+    private var selectedSetIndex: Int {
+        answerSets.firstIndex(where: { $0.id == selectedSetID }) ?? 0
+    }
+
+    // 目前選中那組的標準答案（讀取用）
+    private var choiceKey: [String] {
+        guard answerSets.indices.contains(selectedSetIndex) else {
+            return Array(repeating: "", count: totalChoiceQuestions)
+        }
+        return answerSets[selectedSetIndex].choiceKey
+    }
+
+    // 設定目前選中那組的某一題答案
+    private func setChoiceKey(_ value: String, at index: Int) {
+        guard answerSets.indices.contains(selectedSetIndex),
+              answerSets[selectedSetIndex].choiceKey.indices.contains(index) else { return }
+        answerSets[selectedSetIndex].choiceKey[index] = value
+    }
 
     // MARK: Step2：學生貼上
     @State private var studentRawText: String = ""
@@ -29,6 +61,11 @@ struct ContentView: View {
     // MARK: Step3：輸出
     @State private var resultText: String = ""
     @State private var showCopyToast: Bool = false
+
+    // MARK: 組別管理 UI
+    @State private var showRenameAlert: Bool = false
+    @State private var renameText: String = ""
+    @State private var showDeleteConfirm: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -66,10 +103,11 @@ struct ContentView: View {
                 }
             }
         }
-        // ✅ 啟動載入Step1
-        .onAppear { loadPersistedStep1IfNeeded() }
-        // ✅ Step1 任意更動自動保存
-        .onChange(of: choiceKey) { _, _ in persistChoiceKey() }
+        // ✅ 啟動載入多組答案（含舊資料遷移）
+        .onAppear { loadAnswerSetsIfNeeded() }
+        // ✅ 任意更動自動保存
+        .onChange(of: answerSets) { _, _ in persistAnswerSets() }
+        .onChange(of: selectedSetID) { _, _ in selectedSetIDString = selectedSetID.uuidString }
     }
 }
 
@@ -146,6 +184,11 @@ private extension ContentView {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+
+                        // 組別列
+                        answerSetBar
+                            .padding(.horizontal, horizontalPadding)
+                            .padding(.top, 12)
 
                         // 進度列
                         let filled = choiceKey.filter { !$0.isEmpty }.count
@@ -245,7 +288,7 @@ private extension ContentView {
                             Spacer()
 
                             Button {
-                                if let idx = focusedChoiceIndex { choiceKey[idx] = "" }
+                                if let idx = focusedChoiceIndex { setChoiceKey("", at: idx) }
                             } label: {
                                 Image(systemName: "xmark.circle")
                                     .foregroundStyle(Color.red.opacity(0.8))
@@ -270,10 +313,81 @@ private extension ContentView {
         }
     }
 
+    // MARK: 組別列
+    var answerSetBar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(answerSets) { set in
+                    Button {
+                        selectedSetID = set.id
+                        focusedChoiceIndex = nil
+                    } label: {
+                        if set.id == selectedSetID {
+                            Label(set.name, systemImage: "checkmark")
+                        } else {
+                            Text(set.name)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                    Text(answerSets.indices.contains(selectedSetIndex)
+                         ? answerSets[selectedSetIndex].name : "—")
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray5))
+                )
+            }
+
+            Spacer()
+
+            Button {
+                addAnswerSet()
+            } label: {
+                Image(systemName: "plus.circle.fill").font(.title3)
+            }
+
+            Menu {
+                Button {
+                    renameText = answerSets.indices.contains(selectedSetIndex)
+                        ? answerSets[selectedSetIndex].name : ""
+                    showRenameAlert = true
+                } label: {
+                    Label("重新命名", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Label("刪除這組", systemImage: "trash")
+                }
+                .disabled(answerSets.count <= 1)
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.title3)
+            }
+        }
+        .alert("重新命名", isPresented: $showRenameAlert) {
+            TextField("組別名稱", text: $renameText)
+            Button("取消", role: .cancel) {}
+            Button("儲存") { renameSelectedSet(to: renameText) }
+        }
+        .confirmationDialog("確定刪除這組標準答案？",
+                            isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("刪除", role: .destructive) { deleteSelectedSet() }
+            Button("取消", role: .cancel) {}
+        }
+    }
+
     func handleKeyInput(index: Int, newValue: String) {
-        let normalized = normalizeAnswer(newValue)
+        let normalized = AnswerLogic.normalizeAnswer(newValue)
         let wasEmpty = choiceKey[index].isEmpty
-        choiceKey[index] = normalized
+        setChoiceKey(normalized, at: index)
 
         if wasEmpty, !normalized.isEmpty {
             DispatchQueue.main.async {
@@ -286,17 +400,53 @@ private extension ContentView {
     func toggleLetter(_ letter: String, at index: Int) {
         let current = choiceKey[index]
         if current.contains(letter) {
-            choiceKey[index] = normalizeAnswer(current.filter { String($0) != letter })
+            setChoiceKey(AnswerLogic.normalizeAnswer(current.filter { String($0) != letter }), at: index)
         } else {
-            choiceKey[index] = normalizeAnswer(current + letter)
+            setChoiceKey(AnswerLogic.normalizeAnswer(current + letter), at: index)
         }
     }
 
-    /// ✅ 清空 Step1（同時清掉儲存）——只有按這個才會真的清
-    func clearStep1All() {
-        choiceKey = Array(repeating: "", count: totalChoiceQuestions)
+    // MARK: 組別管理
+
+    /// 新增一組空白答案並選中。
+    func addAnswerSet() {
+        let name = "答案 \(answerSets.count + 1)"
+        let set = AnswerSet(name: name,
+                            choiceKey: Array(repeating: "", count: totalChoiceQuestions))
+        answerSets.append(set)
+        selectedSetID = set.id
         focusedChoiceIndex = nil
-        choiceKeyJSON = ""
+    }
+
+    /// 重新命名目前選中組。
+    func renameSelectedSet(to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, answerSets.indices.contains(selectedSetIndex) else { return }
+        answerSets[selectedSetIndex].name = trimmed
+    }
+
+    /// 刪除目前選中組；若刪到剩 0 則補一組空白。
+    func deleteSelectedSet() {
+        guard answerSets.indices.contains(selectedSetIndex) else { return }
+        let removingIndex = selectedSetIndex
+        answerSets.remove(at: removingIndex)
+        if answerSets.isEmpty {
+            let fresh = AnswerSet(name: "答案 1",
+                                  choiceKey: Array(repeating: "", count: totalChoiceQuestions))
+            answerSets = [fresh]
+            selectedSetID = fresh.id
+        } else {
+            let newIndex = min(removingIndex, answerSets.count - 1)
+            selectedSetID = answerSets[newIndex].id
+        }
+        focusedChoiceIndex = nil
+    }
+
+    /// ✅ 清空目前選中組的格子（保留該組，不刪除）
+    func clearStep1All() {
+        guard answerSets.indices.contains(selectedSetIndex) else { return }
+        answerSets[selectedSetIndex].choiceKey = Array(repeating: "", count: totalChoiceQuestions)
+        focusedChoiceIndex = nil
     }
 }
 
@@ -309,10 +459,26 @@ private extension ContentView {
                 .padding(.horizontal, 14)
                 .padding(.top, 10)
 
+            // 對答案組別選擇
+            HStack(spacing: 8) {
+                Text("對答案組別")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Picker("對答案組別", selection: $selectedSetID) {
+                    ForEach(answerSets) { set in
+                        Text(set.name).tag(set.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+
             HStack(spacing: 10) {
                 Button {
-                    let submission = parseStudentSubmission(studentRawText)
-                    resultText = buildResultText(submission: submission)
+                    let key = choiceKey
+                    let submission = AnswerLogic.parseStudentSubmission(studentRawText, key: key)
+                    resultText = AnswerLogic.buildResultText(submission: submission, key: key)
                     step = 3
                     dismissKeyboard()
                 } label: {
@@ -392,9 +558,11 @@ private extension ContentView {
     }
 }
 
-// MARK: - Step2 Parser（支援多種格式）
-private extension ContentView {
-    func parseStudentSubmission(_ raw: String) -> StudentSubmission {
+// MARK: - 答案解析 / 比對純邏輯（可測試）
+enum AnswerLogic {
+    static let totalChoiceQuestions = 100
+
+    static func parseStudentSubmission(_ raw: String, key: [String]) -> StudentSubmission {
         var sub = StudentSubmission()
 
         let lines = raw
@@ -414,7 +582,7 @@ private extension ContentView {
 
             if let (startQ, remainder) = extractLeadingNumber(line) {
                 // 有題號行："01 CABCC…" 或 "1 CACCC…"
-                let parsed = parseAnswerLine(startQ: startQ, remainder: remainder)
+                let parsed = parseAnswerLine(startQ: startQ, remainder: remainder, key: key)
                 for (q, a) in parsed where (1...totalChoiceQuestions).contains(q) {
                     sub.answers[q] = a
                 }
@@ -422,7 +590,7 @@ private extension ContentView {
 
             } else if isAnswerOnlyLine(line) {
                 // 無題號行（只含 A/B/C/D 與空格），從 autoQ 接續
-                let parsed = parseAnswerLine(startQ: autoQ, remainder: line)
+                let parsed = parseAnswerLine(startQ: autoQ, remainder: line, key: key)
                 for (q, a) in parsed where (1...totalChoiceQuestions).contains(q) {
                     sub.answers[q] = a
                 }
@@ -435,7 +603,7 @@ private extension ContentView {
 
     /// 行首有 1–2 位數字 + 空白時，回傳 (startQ, remainder)。
     /// 支援 "01 CABCC…" 與 "1 CACCC…" 兩種格式。
-    func extractLeadingNumber(_ line: String) -> (Int, String)? {
+    static func extractLeadingNumber(_ line: String) -> (Int, String)? {
         let pattern = #"^(\d{1,2})\s*(.*)"#
         guard let re = try? NSRegularExpression(pattern: pattern),
               let m = re.firstMatch(in: line, range: NSRange(line.startIndex..., in: line))
@@ -448,22 +616,26 @@ private extension ContentView {
 
     /// 整行只含 A/B/C/D（大小寫）與空格時回傳 true。
     /// 用於辨識 Gary 格式的無題號答案行；含中文/數字/標點的表頭行會回傳 false。
-    func isAnswerOnlyLine(_ line: String) -> Bool {
+    static func isAnswerOnlyLine(_ line: String) -> Bool {
         return line.uppercased().allSatisfy { "ABCD ".contains($0) }
     }
 
+    /// 以「標準答案結構」為準拆解學生作答，與起始題號 / 跳號無關。
     /// 支援：
-    /// - "DDCA 5 AC 6 BC ..."
-    /// - "DBCA/AC BC/BD/AC/CD/BC"
+    /// - "DDCA 5 AC 6 BC ..."（行內可用數字重設題號）
+    /// - "DBCA/AC BC/BD/AC/CD/BC"（"/" 視為空白分隔）
     /// - "DBCA AC BC BD AC CD BC"
-    /// - "DBCAAC BCBDACCDBC"
-    func parseAnswerLine(startQ: Int, remainder: String) -> [Int: String] {
+    /// - "DBCAAC BCBDACCDBC"（連續字串）
+    ///
+    /// 連續字母串依「該題標準答案的字母數」逐題取字：
+    /// key 為單選（1 字母）→ 每題取 1 個；key 為複選（n 字母）→ 該題取 n 個；
+    /// key 未填的題目預設取 1 個（最常見的單選）。
+    static func parseAnswerLine(startQ: Int, remainder: String, key: [String]) -> [Int: String] {
         var result: [Int: String] = [:]
         let replaced = remainder.replacingOccurrences(of: "/", with: " ")
         let tokens = tokenizeNumberAndLetters(replaced)
 
         var q = startQ
-        var firstFourDone = false
 
         for token in tokens {
             if let num = Int(token) {
@@ -471,65 +643,31 @@ private extension ContentView {
                 continue
             }
 
-            let lettersOnly = token.uppercased().filter { "ABCD".contains($0) }
+            let lettersOnly = Array(token.uppercased().filter { "ABCD".contains($0) })
             if lettersOnly.isEmpty { continue }
 
-            if lettersOnly.count == 10 {
-                for ch in lettersOnly { result[q] = normalizeAnswer(String(ch)); q += 1 }
-                continue
-            }
-            if lettersOnly.count == 5 {
-                for ch in lettersOnly { result[q] = normalizeAnswer(String(ch)); q += 1 }
-                continue
-            }
-
-            if startQ == 1, !firstFourDone, q == 1, lettersOnly.count >= 4 {
-                let chars = Array(lettersOnly)
-                for k in 0..<4 { result[q] = normalizeAnswer(String(chars[k])); q += 1 }
-                firstFourDone = true
-
-                if chars.count > 4 {
-                    var idx = 4
-                    while idx < chars.count {
-                        if idx + 1 < chars.count {
-                            let pair = String(chars[idx]) + String(chars[idx + 1])
-                            result[q] = normalizeAnswer(pair)
-                            q += 1
-                            idx += 2
-                        } else {
-                            result[q] = normalizeAnswer(String(chars[idx]))
-                            q += 1
-                            idx += 1
-                        }
-                    }
-                }
-                continue
-            }
-
-            if lettersOnly.count == 1 {
-                result[q] = normalizeAnswer(String(lettersOnly)); q += 1
-            } else if lettersOnly.count <= 4 {
-                result[q] = normalizeAnswer(String(lettersOnly)); q += 1
-            } else {
-                if lettersOnly.count % 2 == 0 {
-                    let chars = Array(lettersOnly)
-                    var idx = 0
-                    while idx < chars.count {
-                        let pair = String(chars[idx]) + String(chars[idx + 1])
-                        result[q] = normalizeAnswer(pair)
-                        q += 1
-                        idx += 2
-                    }
-                } else {
-                    for ch in lettersOnly { result[q] = normalizeAnswer(String(ch)); q += 1 }
-                }
+            var idx = 0
+            while idx < lettersOnly.count {
+                let need = expectedLetterCount(forQuestion: q, key: key)
+                let end = min(idx + need, lettersOnly.count)
+                let chunk = String(lettersOnly[idx..<end])
+                result[q] = normalizeAnswer(chunk)
+                q += 1
+                idx = end
             }
         }
 
         return result
     }
 
-    func tokenizeNumberAndLetters(_ s: String) -> [String] {
+    /// 某題標準答案期望的字母數；未填則預設 1。
+    static func expectedLetterCount(forQuestion q: Int, key: [String]) -> Int {
+        guard (1...totalChoiceQuestions).contains(q), key.indices.contains(q - 1) else { return 1 }
+        let n = normalizeAnswer(key[q - 1]).count
+        return max(1, n)
+    }
+
+    static func tokenizeNumberAndLetters(_ s: String) -> [String] {
         let pattern = #"(\d+|[A-Za-z]+)"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return s.split(separator: " ").map { String($0) }
@@ -540,17 +678,14 @@ private extension ContentView {
     }
 
     /// 正規化：只留 ABCD、去重、排序（"CA" -> "AC"）
-    func normalizeAnswer(_ s: String) -> String {
+    static func normalizeAnswer(_ s: String) -> String {
         let upper = s.uppercased()
         let filtered = upper.filter { "ABCD".contains($0) }
         if filtered.isEmpty { return "" }
         return String(Set(filtered).sorted())
     }
-}
 
-// MARK: - Step3 Compare + Output
-private extension ContentView {
-    func buildResultText(submission: StudentSubmission) -> String {
+    static func buildResultText(submission: StudentSubmission, key: [String]) -> String {
         let header = submission.headerLine.isEmpty ? "（未提供姓名/科目）" : submission.headerLine
 
         var wrong: [Int] = []
@@ -558,13 +693,14 @@ private extension ContentView {
         var total = 0   // 有標準答案的題數
 
         for q in 1...totalChoiceQuestions {
-            let key = normalizeAnswer(choiceKey[q - 1])
-            if key.isEmpty { continue } // 標準答案未填，不計
+            guard key.indices.contains(q - 1) else { continue }
+            let answer = normalizeAnswer(key[q - 1])
+            if answer.isEmpty { continue } // 標準答案未填，不計
             total += 1
 
             let stu = submission.answers[q] ?? ""
             if stu.isEmpty { skipped.append(q); continue }
-            if normalizeAnswer(stu) != key { wrong.append(q) }
+            if normalizeAnswer(stu) != answer { wrong.append(q) }
         }
 
         let correct = total - wrong.count - skipped.count
@@ -584,16 +720,58 @@ private extension ContentView {
 
 // MARK: - Persistence（Step1 永久保存）
 private extension ContentView {
-    func loadPersistedStep1IfNeeded() {
-        guard !choiceKey.contains(where: { !$0.isEmpty }), !choiceKeyJSON.isEmpty else { return }
-        if let loaded: [String] = decodeJSON(choiceKeyJSON, as: [String].self),
-           loaded.count == totalChoiceQuestions {
-            choiceKey = loaded
+    /// 啟動載入：優先讀多組；否則遷移舊單組；都沒有則建立一組空白。
+    func loadAnswerSetsIfNeeded() {
+        // 已在記憶體中（例如切換 step 後重新 onAppear）就不重載
+        guard answerSets.isEmpty else { return }
+
+        // 1) 既有多組資料
+        if let loaded: [AnswerSet] = decodeJSON(answerSetsJSON, as: [AnswerSet].self),
+           !loaded.isEmpty {
+            answerSets = loaded.map { normalizedSet($0) }
+            if let saved = UUID(uuidString: selectedSetIDString),
+               answerSets.contains(where: { $0.id == saved }) {
+                selectedSetID = saved
+            } else {
+                selectedSetID = answerSets[0].id
+            }
+            return
         }
+
+        // 2) 遷移舊單組
+        if let oldKey: [String] = decodeJSON(choiceKeyJSON, as: [String].self),
+           oldKey.contains(where: { !$0.isEmpty }) {
+            let migrated = AnswerSet(name: "預設", choiceKey: padKey(oldKey))
+            answerSets = [migrated]
+            selectedSetID = migrated.id
+            persistAnswerSets()
+            return
+        }
+
+        // 3) 全新：一組空白
+        let fresh = AnswerSet(name: "答案 1",
+                              choiceKey: Array(repeating: "", count: totalChoiceQuestions))
+        answerSets = [fresh]
+        selectedSetID = fresh.id
     }
 
-    func persistChoiceKey() {
-        choiceKeyJSON = encodeJSON(choiceKey) ?? ""
+    func persistAnswerSets() {
+        answerSetsJSON = encodeJSON(answerSets) ?? ""
+        selectedSetIDString = selectedSetID.uuidString
+    }
+
+    /// 確保 choiceKey 長度為 totalChoiceQuestions。
+    func padKey(_ key: [String]) -> [String] {
+        if key.count == totalChoiceQuestions { return key }
+        var k = Array(key.prefix(totalChoiceQuestions))
+        while k.count < totalChoiceQuestions { k.append("") }
+        return k
+    }
+
+    func normalizedSet(_ set: AnswerSet) -> AnswerSet {
+        var s = set
+        s.choiceKey = padKey(s.choiceKey)
+        return s
     }
 
     func encodeJSON<T: Encodable>(_ value: T) -> String? {
