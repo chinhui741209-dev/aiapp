@@ -32,6 +32,9 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		3719BEB02ED92BE000C132F2 /* AnswerChecker */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3719BF022ED92BE000C132F2 /* Exceptions for "AnswerChecker" folder in "AnswerChecker" target */,
+			);
 			path = AnswerChecker;
 			sourceTree = "<group>";
 		};
@@ -46,6 +49,16 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3719BF022ED92BE000C132F2 /* Exceptions for "AnswerChecker" folder in "AnswerChecker" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3719BEAD2ED92BE000C132F2 /* AnswerChecker */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		3719BEAB2ED92BE000C132F2 /* Frameworks */ = {
@@ -101,6 +114,7 @@
 			buildPhases = (
 				3719BEAA2ED92BE000C132F2 /* Sources */,
 				3719BEAB2ED92BE000C132F2 /* Frameworks */,
+				3719BF012ED92BE000C132F2 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -207,6 +221,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		3719BF012ED92BE000C132F2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		3719BEB92ED92BE100C132F2 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
