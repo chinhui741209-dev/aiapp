@@ -577,7 +577,7 @@ enum AnswerLogic {
         var autoQ = 1   // 無題號行（Gary格式）時從此接續
 
         for i in 1..<lines.count {
-            let line = lines[i]
+            let line = normalizeWidth(lines[i])
             if line.isEmpty { continue }
 
             if let (startQ, remainder) = extractLeadingNumber(line) {
@@ -601,10 +601,24 @@ enum AnswerLogic {
         return sub
     }
 
-    /// 行首有 1–2 位數字 + 空白時，回傳 (startQ, remainder)。
-    /// 支援 "01 CABCC…" 與 "1 CACCC…" 兩種格式。
+    /// 行首為題號（1–3 位數）時，回傳 (startQ, remainder)。
+    /// 支援：
+    /// - "01 CABCC…"、"1 CACCC…"、"100 A"（單一題號，題號可達 3 位數）
+    /// - "1-4:ABDA"、"11-15 BDCCC"、全形冒號（題號範圍）：取起始題號，
+    ///   捨棄結束題號與冒號，其餘作答交給逐題 key-guided 切字。
     static func extractLeadingNumber(_ line: String) -> (Int, String)? {
-        let pattern = #"^(\d{1,2})\s*(.*)"#
+        // 題號範圍："X-Y[:]answers"——連字號支援 - – — ~ ～，冒號支援 : ：
+        let rangePattern = #"^(\d{1,3})\s*[-–—~～]\s*\d{1,3}\s*[:：]?\s*(.*)$"#
+        if let re = try? NSRegularExpression(pattern: rangePattern),
+           let m = re.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
+            let ns = line as NSString
+            if let q = Int(ns.substring(with: m.range(at: 1))) {
+                return (q, ns.substring(with: m.range(at: 2)))
+            }
+        }
+
+        // 單一題號（可達 3 位數，涵蓋 Q100）
+        let pattern = #"^(\d{1,3})\s*(.*)"#
         guard let re = try? NSRegularExpression(pattern: pattern),
               let m = re.firstMatch(in: line, range: NSRange(line.startIndex..., in: line))
         else { return nil }
@@ -612,6 +626,22 @@ enum AnswerLogic {
         guard let q = Int(ns.substring(with: m.range(at: 1))) else { return nil }
         let rest = ns.substring(with: m.range(at: 2))
         return (q, rest)
+    }
+
+    /// 全形數字 / 英文字母 → 半形（其餘字元不動）。
+    /// 讓學生貼上的全形英數（如 "１-４：ＡＢＤＡ"）也能正確解析；
+    /// 全形括號、冒號分別由 tokenize 忽略 / 範圍偵測處理，不需在此清除。
+    static func normalizeWidth(_ s: String) -> String {
+        let mapped = s.unicodeScalars.map { scalar -> Character in
+            let v = scalar.value
+            // 全形 ０–９ (U+FF10–FF19)、Ａ–Ｚ (U+FF21–FF3A)、ａ–ｚ (U+FF41–FF5A)
+            if (0xFF10...0xFF19).contains(v) || (0xFF21...0xFF3A).contains(v) || (0xFF41...0xFF5A).contains(v),
+               let half = Unicode.Scalar(v - 0xFEE0) {
+                return Character(half)
+            }
+            return Character(scalar)
+        }
+        return String(mapped)
     }
 
     /// 整行只含 A/B/C/D（大小寫）與空格時回傳 true。
