@@ -947,6 +947,32 @@ enum AnswerLogic {
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0.q < $1.q }
     }
 
+    /// 從表頭行取顯示名：以 "/" 分欄，優先取含英文字母的欄位（英文名），
+    /// 沒有英文名則取第一欄（通常是中文姓名），皆無則「（未命名）」。
+    static func displayName(from header: String) -> String {
+        let trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "（未命名）" }
+        let fields = trimmed.split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if let english = fields.first(where: { $0.contains(where: { $0.isASCII && $0.isLetter }) }) {
+            return english
+        }
+        return fields.first ?? trimmed
+    }
+
+    /// 各題錯誤學生名單；依題號升冪，只含至少 1 人錯的題，名字維持 records 既有順序。
+    static func questionErrorNames(_ records: [StudentRecord]) -> [(q: Int, names: [String])] {
+        var namesByQ: [Int: [String]] = [:]
+        for r in records {
+            let display = displayName(from: r.name)
+            for q in Set(r.wrong) { namesByQ[q, default: []].append(display) }
+        }
+        return namesByQ
+            .map { (q: $0.key, names: $0.value) }
+            .sorted { $0.q < $1.q }
+    }
+
     /// 統計摘要（可複製文字）。
     static func buildStatsText(setName: String, records: [StudentRecord]) -> String {
         var out: [String] = []
@@ -959,13 +985,13 @@ enum AnswerLogic {
         }
 
         out.append("")
-        out.append("各題錯誤人數（多→少）：")
-        let ranking = questionErrorRanking(records)
-        if ranking.isEmpty {
+        out.append("各題錯誤名單（依題號）：")
+        let byQuestion = questionErrorNames(records)
+        if byQuestion.isEmpty {
             out.append("（全部答對，無錯題）")
         } else {
-            for item in ranking {
-                out.append("第 \(item.q) 題：\(item.count) 人")
+            for item in byQuestion {
+                out.append("第 \(item.q) 題（\(item.names.count) 人）：\(item.names.joined(separator: ", "))")
             }
         }
 

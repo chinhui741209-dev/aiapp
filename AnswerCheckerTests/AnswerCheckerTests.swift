@@ -185,16 +185,37 @@ struct AnswerCheckerTests {
         #expect(ranking.map { $0.q } == [2, 1, 3])
     }
 
+    @Test func questionErrorNamesListsWhoMissed() {
+        let recs = [
+            StudentRecord(name: "小明", wrong: [1, 2], total: 5),
+            StudentRecord(name: "小華", wrong: [2], total: 5),
+            StudentRecord(name: "小美", wrong: [], total: 5),
+        ]
+        let byQ = AnswerLogic.questionErrorNames(recs)
+        #expect(byQ.map { $0.q } == [1, 2])           // 依題號升冪、無 Q3（無人錯）
+        #expect(byQ.first { $0.q == 1 }?.names == ["小明"])
+        #expect(byQ.first { $0.q == 2 }?.names == ["小明", "小華"])
+    }
+
+    @Test func questionErrorNamesUsesEnglishName() {
+        let recs = [
+            StudentRecord(name: "陳妤萱/Alina/高中第九回", wrong: [1], total: 5),
+            StudentRecord(name: "王小明/高中第九回", wrong: [1], total: 5),   // 無英文名 → 留中文
+        ]
+        let byQ = AnswerLogic.questionErrorNames(recs)
+        #expect(byQ.first { $0.q == 1 }?.names == ["Alina", "王小明"])
+    }
+
     @Test func statsTextContainsSections() {
         let recs = [
-            StudentRecord(name: "小明", wrong: [1], total: 5),
-            StudentRecord(name: "小華", wrong: [], total: 5),
+            StudentRecord(name: "小明", wrong: [1, 2], total: 5),
+            StudentRecord(name: "小華", wrong: [2], total: 5),
         ]
         let text = AnswerLogic.buildStatsText(setName: "第九回", records: recs)
         #expect(text.contains("已記錄：2 位"))
-        #expect(text.contains("各題錯誤人數"))
+        #expect(text.contains("各題錯誤名單"))
+        #expect(text.contains("第 2 題（2 人）：小明, 小華"))
         #expect(text.contains("每位學生錯題"))
-        #expect(text.contains("小華：全對"))
     }
 
     @Test func legacyAnswerSetDecodesWithoutRecords() throws {
