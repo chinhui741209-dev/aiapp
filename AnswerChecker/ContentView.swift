@@ -7,11 +7,42 @@ struct StudentSubmission {
     var answers: [Int: String] = [:]        // 題號 -> "A"/"AC"
 }
 
+// MARK: - 一位學生的錯題記錄
+struct StudentRecord: Identifiable, Codable, Equatable {
+    var id: UUID = UUID()
+    var name: String            // = 學生作答表頭行（去空白），作為同名覆蓋的識別
+    var wrong: [Int]            // 錯誤題號（排序），對應「訂正」清單語意（不含缺答）
+    var total: Int              // 該次有標準答案的題數
+}
+
 // MARK: - 一組具名標準答案
 struct AnswerSet: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var name: String
     var choiceKey: [String]                 // 100 元素，index 0 = Q1
+    var records: [StudentRecord] = []       // 累積的學生錯題記錄
+    var startQuestion: Int = 1              // 起始題號；計分/比對/統計忽略此題號以前
+
+    private enum CodingKeys: String, CodingKey { case id, name, choiceKey, records, startQuestion }
+
+    init(id: UUID = UUID(), name: String, choiceKey: [String], records: [StudentRecord] = [], startQuestion: Int = 1) {
+        self.id = id
+        self.name = name
+        self.choiceKey = choiceKey
+        self.records = records
+        self.startQuestion = min(max(1, startQuestion), 100)
+    }
+
+    // 向後相容：舊版 JSON 沒有 records / startQuestion 欄位，缺少時用預設值（避免整組資料解碼失敗）
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        choiceKey = try c.decode([String].self, forKey: .choiceKey)
+        records = try c.decodeIfPresent([StudentRecord].self, forKey: .records) ?? []
+        let s = try c.decodeIfPresent(Int.self, forKey: .startQuestion) ?? 1
+        startQuestion = min(max(1, s), 100)
+    }
 }
 
 // MARK: - 主畫面
@@ -55,6 +86,21 @@ struct ContentView: View {
         answerSets[selectedSetIndex].choiceKey[index] = value
     }
 
+    // 目前選中那組的起始題號（讀取用）
+    private var startQuestion: Int {
+        answerSets.indices.contains(selectedSetIndex) ? answerSets[selectedSetIndex].startQuestion : 1
+    }
+
+    private func setStartQuestion(_ value: Int) {
+        guard answerSets.indices.contains(selectedSetIndex) else { return }
+        answerSets[selectedSetIndex].startQuestion = min(max(1, value), totalChoiceQuestions)
+    }
+
+    // 供 Picker 綁定
+    private var startQuestionBinding: Binding<Int> {
+        Binding(get: { startQuestion }, set: { setStartQuestion($0) })
+    }
+
     // MARK: Step2：學生貼上
     @State private var studentRawText: String = ""
 
@@ -66,6 +112,10 @@ struct ContentView: View {
     @State private var showRenameAlert: Bool = false
     @State private var renameText: String = ""
     @State private var showDeleteConfirm: Bool = false
+
+    // MARK: 統計 UI
+    @State private var showStatsSheet: Bool = false
+    @State private var showClearRecordsConfirm: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -190,15 +240,34 @@ private extension ContentView {
                             .padding(.horizontal, horizontalPadding)
                             .padding(.top, 12)
 
-                        // 進度列
-                        let filled = choiceKey.filter { !$0.isEmpty }.count
+                        // 起始題號
+                        HStack(spacing: 8) {
+                            Text("起始題號")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Picker("起始題號", selection: startQuestionBinding) {
+                                ForEach(1...totalChoiceQuestions, id: \.self) { n in
+                                    Text("第 \(n) 題").tag(n)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            Text("起以前不計分")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, horizontalPadding)
+
+                        // 進度列（只計起始題號起算的範圍）
+                        let rangeTotal = totalChoiceQuestions - startQuestion + 1
+                        let filled = (startQuestion...totalChoiceQuestions).filter { !choiceKey[$0 - 1].isEmpty }.count
                         HStack {
                             Text("標準答案")
                                 .font(.title3.bold())
                             Spacer()
-                            Text("\(filled) / \(totalChoiceQuestions)")
+                            Text("\(filled) / \(rangeTotal)")
                                 .font(.system(.subheadline, design: .monospaced))
-                                .foregroundStyle(filled == totalChoiceQuestions ? Color.accentColor : .secondary)
+                                .foregroundStyle(filled == rangeTotal ? Color.accentColor : .secondary)
                         }
                         .padding(.horizontal, horizontalPadding)
                         .padding(.top, 12)
@@ -211,7 +280,7 @@ private extension ContentView {
                                     .frame(height: 4)
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(Color.accentColor)
-                                    .frame(width: bar.size.width * CGFloat(filled) / CGFloat(totalChoiceQuestions),
+                                    .frame(width: bar.size.width * CGFloat(filled) / CGFloat(max(1, rangeTotal)),
                                            height: 4)
                                     .animation(.easeInOut(duration: 0.2), value: filled)
                             }
@@ -349,6 +418,14 @@ private extension ContentView {
             Spacer()
 
             Button {
+                showStatsSheet = true
+            } label: {
+                Label("統計", systemImage: "chart.bar")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+
+            Button {
                 addAnswerSet()
             } label: {
                 Image(systemName: "plus.circle.fill").font(.title3)
@@ -382,6 +459,70 @@ private extension ContentView {
             Button("刪除", role: .destructive) { deleteSelectedSet() }
             Button("取消", role: .cancel) {}
         }
+        .sheet(isPresented: $showStatsSheet) { statsSheet }
+    }
+
+    // 目前選中組的記錄筆數
+    var currentRecordCount: Int {
+        answerSets.indices.contains(selectedSetIndex) ? answerSets[selectedSetIndex].records.count : 0
+    }
+
+    // MARK: 統計 sheet
+    var statsSheet: some View {
+        let setName = answerSets.indices.contains(selectedSetIndex) ? answerSets[selectedSetIndex].name : "—"
+        let records = answerSets.indices.contains(selectedSetIndex) ? answerSets[selectedSetIndex].records : []
+        let statsText = AnswerLogic.buildStatsText(setName: setName, records: records)
+
+        return NavigationStack {
+            VStack(spacing: 12) {
+                ScrollView {
+                    Text(statsText)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .textSelection(.enabled)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.gray.opacity(0.25))
+                )
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+
+                HStack(spacing: 10) {
+                    Button {
+                        UIPasteboard.general.string = statsText
+                        toastCopied()
+                    } label: {
+                        Label("複製", systemImage: "doc.on.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button(role: .destructive) {
+                        showClearRecordsConfirm = true
+                    } label: {
+                        Label("清空記錄", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(records.isEmpty)
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+            }
+            .navigationTitle("本組統計")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showStatsSheet = false }
+                }
+            }
+            .confirmationDialog("確定清空本組記錄？此動作無法復原。",
+                                isPresented: $showClearRecordsConfirm, titleVisibility: .visible) {
+                Button("清空記錄", role: .destructive) { clearRecordsForSelectedSet() }
+                Button("取消", role: .cancel) {}
+            }
+        }
     }
 
     func handleKeyInput(index: Int, newValue: String) {
@@ -404,6 +545,24 @@ private extension ContentView {
         } else {
             setChoiceKey(AnswerLogic.normalizeAnswer(current + letter), at: index)
         }
+    }
+
+    // MARK: 錯題記錄
+
+    /// 產生訂正時自動記錄該生錯題到 Step2 選定的對答案組（同名覆蓋）。
+    func recordSubmission(_ submission: StudentSubmission, key: [String]) {
+        guard answerSets.indices.contains(selectedSetIndex) else { return }
+        let e = AnswerLogic.evaluate(submission: submission, key: key, startQuestion: startQuestion)
+        guard e.total > 0 else { return }   // 無標準答案不記錄
+        let name = submission.headerLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        answerSets[selectedSetIndex].records = AnswerLogic.upsertRecord(
+            answerSets[selectedSetIndex].records, name: name, wrong: e.wrong, total: e.total)
+    }
+
+    /// 清空目前選中組的所有錯題記錄。
+    func clearRecordsForSelectedSet() {
+        guard answerSets.indices.contains(selectedSetIndex) else { return }
+        answerSets[selectedSetIndex].records = []
     }
 
     // MARK: 組別管理
@@ -477,8 +636,10 @@ private extension ContentView {
             HStack(spacing: 10) {
                 Button {
                     let key = choiceKey
-                    let submission = AnswerLogic.parseStudentSubmission(studentRawText, key: key)
-                    resultText = AnswerLogic.buildResultText(submission: submission, key: key)
+                    let start = startQuestion
+                    let submission = AnswerLogic.parseStudentSubmission(studentRawText, key: key, startQuestion: start)
+                    resultText = AnswerLogic.buildResultText(submission: submission, key: key, startQuestion: start)
+                    recordSubmission(submission, key: key)
                     step = 3
                     dismissKeyboard()
                 } label: {
@@ -562,7 +723,7 @@ private extension ContentView {
 enum AnswerLogic {
     static let totalChoiceQuestions = 100
 
-    static func parseStudentSubmission(_ raw: String, key: [String]) -> StudentSubmission {
+    static func parseStudentSubmission(_ raw: String, key: [String], startQuestion: Int = 1) -> StudentSubmission {
         var sub = StudentSubmission()
 
         let lines = raw
@@ -574,7 +735,7 @@ enum AnswerLogic {
         guard !lines.isEmpty else { return sub }
         sub.headerLine = lines[0]
 
-        var autoQ = 1   // 無題號行（Gary格式）時從此接續
+        var autoQ = max(1, startQuestion)   // 無題號行（Gary格式）時從起始題號接續
 
         for i in 1..<lines.count {
             let line = normalizeWidth(lines[i])
@@ -715,34 +876,105 @@ enum AnswerLogic {
         return String(Set(filtered).sorted())
     }
 
-    static func buildResultText(submission: StudentSubmission, key: [String]) -> String {
-        let header = submission.headerLine.isEmpty ? "（未提供姓名/科目）" : submission.headerLine
+    /// 評分結果（供訂正文字與統計記錄共用）。
+    struct Evaluation {
+        var wrong: [Int] = []       // 答錯的題號
+        var skipped: [Int] = []     // 缺答（未作答）的題號
+        var total: Int = 0          // 有標準答案的題數
+        var correct: Int { total - wrong.count - skipped.count }
+    }
 
-        var wrong: [Int] = []
-        var skipped: [Int] = []
-        var total = 0   // 有標準答案的題數
-
-        for q in 1...totalChoiceQuestions {
+    /// 比對學生作答與標準答案，回傳結構化結果。
+    /// `startQuestion` 以前的題目一律忽略（不計分、不算缺答）。
+    static func evaluate(submission: StudentSubmission, key: [String], startQuestion: Int = 1) -> Evaluation {
+        var e = Evaluation()
+        let start = min(max(1, startQuestion), totalChoiceQuestions)
+        for q in start...totalChoiceQuestions {
             guard key.indices.contains(q - 1) else { continue }
             let answer = normalizeAnswer(key[q - 1])
             if answer.isEmpty { continue } // 標準答案未填，不計
-            total += 1
+            e.total += 1
 
             let stu = submission.answers[q] ?? ""
-            if stu.isEmpty { skipped.append(q); continue }
-            if normalizeAnswer(stu) != answer { wrong.append(q) }
+            if stu.isEmpty { e.skipped.append(q); continue }
+            if normalizeAnswer(stu) != answer { e.wrong.append(q) }
         }
+        return e
+    }
 
-        let correct = total - wrong.count - skipped.count
+    static func buildResultText(submission: StudentSubmission, key: [String], startQuestion: Int = 1) -> String {
+        let header = submission.headerLine.isEmpty ? "（未提供姓名/科目）" : submission.headerLine
+        let e = evaluate(submission: submission, key: key, startQuestion: startQuestion)
 
         var out: [String] = []
         out.append(header)
-        if total > 0 {
-            out.append("得分：\(correct)/\(total)")
+        if e.total > 0 {
+            out.append("得分：\(e.correct)/\(e.total)")
         }
-        out.append("訂正：\(wrong.isEmpty ? "無" : wrong.map(String.init).joined(separator: ", "))")
-        if !skipped.isEmpty {
-            out.append("缺答：\(skipped.map(String.init).joined(separator: ", "))")
+        out.append("訂正：\(e.wrong.isEmpty ? "無" : e.wrong.map(String.init).joined(separator: ", "))")
+        if !e.skipped.isEmpty {
+            out.append("缺答：\(e.skipped.map(String.init).joined(separator: ", "))")
+        }
+        return out.joined(separator: "\n")
+    }
+
+    // MARK: 錯題記錄與統計
+
+    /// 同名覆蓋：依 name（去空白）比對，存在則更新其 wrong/total，否則新增一筆。
+    static func upsertRecord(_ records: [StudentRecord], name: String, wrong: [Int], total: Int) -> [StudentRecord] {
+        let key = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = records
+        let sortedWrong = wrong.sorted()
+        if let idx = result.firstIndex(where: {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == key
+        }) {
+            result[idx].wrong = sortedWrong
+            result[idx].total = total
+        } else {
+            result.append(StudentRecord(name: key, wrong: sortedWrong, total: total))
+        }
+        return result
+    }
+
+    /// 各題錯誤人數；依人數降冪、同人數依題號升冪。
+    static func questionErrorRanking(_ records: [StudentRecord]) -> [(q: Int, count: Int)] {
+        var counts: [Int: Int] = [:]
+        for r in records {
+            for q in Set(r.wrong) { counts[q, default: 0] += 1 }
+        }
+        return counts
+            .map { (q: $0.key, count: $0.value) }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.q < $1.q }
+    }
+
+    /// 統計摘要（可複製文字）。
+    static func buildStatsText(setName: String, records: [StudentRecord]) -> String {
+        var out: [String] = []
+        out.append("【\(setName)】錯題統計")
+        out.append("已記錄：\(records.count) 位")
+
+        guard !records.isEmpty else {
+            out.append("（尚無記錄）")
+            return out.joined(separator: "\n")
+        }
+
+        out.append("")
+        out.append("各題錯誤人數（多→少）：")
+        let ranking = questionErrorRanking(records)
+        if ranking.isEmpty {
+            out.append("（全部答對，無錯題）")
+        } else {
+            for item in ranking {
+                out.append("第 \(item.q) 題：\(item.count) 人")
+            }
+        }
+
+        out.append("")
+        out.append("每位學生錯題：")
+        for r in records {
+            let name = r.name.isEmpty ? "（未命名）" : r.name
+            let detail = r.wrong.isEmpty ? "全對" : r.wrong.map(String.init).joined(separator: ", ")
+            out.append("\(name)：\(detail)")
         }
         return out.joined(separator: "\n")
     }
