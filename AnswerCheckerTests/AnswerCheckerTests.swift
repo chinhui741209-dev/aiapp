@@ -6,6 +6,7 @@
 //
 
 import Testing
+import Foundation
 @testable import AnswerChecker
 
 struct AnswerCheckerTests {
@@ -142,6 +143,118 @@ struct AnswerCheckerTests {
         #expect(sub.answers[1] == "A")
         #expect(sub.answers[4] == "A")
         #expect(AnswerLogic.buildResultText(submission: sub, key: key).contains("得分：4/4"))
+    }
+
+    // MARK: 錯題記錄與統計
+
+    @Test func evaluateReportsWrongAndSkipped() {
+        let key = makeKey([1: "A", 2: "B", 3: "C", 4: "D"])
+        // Q1 對、Q2 錯、Q3 缺答、Q4 對
+        let sub = AnswerLogic.parseStudentSubmission("生\n1 A\n2 C\n4 D", key: key)
+        let e = AnswerLogic.evaluate(submission: sub, key: key)
+        #expect(e.total == 4)
+        #expect(e.wrong == [2])
+        #expect(e.skipped == [3])
+        #expect(e.correct == 2)
+    }
+
+    @Test func upsertReplacesSameName() {
+        var recs: [StudentRecord] = []
+        recs = AnswerLogic.upsertRecord(recs, name: "小明", wrong: [3, 1], total: 10)
+        recs = AnswerLogic.upsertRecord(recs, name: "小華", wrong: [2], total: 10)
+        #expect(recs.count == 2)
+        #expect(recs[0].wrong == [1, 3])   // 已排序
+
+        // 同名重對 → 覆蓋，不新增
+        recs = AnswerLogic.upsertRecord(recs, name: "小明", wrong: [5], total: 10)
+        #expect(recs.count == 2)
+        let ming = recs.first { $0.name == "小明" }
+        #expect(ming?.wrong == [5])
+    }
+
+    @Test func rankingCountsAndSorts() {
+        let recs = [
+            StudentRecord(name: "A", wrong: [1, 2], total: 5),
+            StudentRecord(name: "B", wrong: [2, 3], total: 5),
+            StudentRecord(name: "C", wrong: [2], total: 5),
+        ]
+        let ranking = AnswerLogic.questionErrorRanking(recs)
+        // 第2題 3 人（最多），其次第1、第3 各 1 人（同人數依題號升冪）
+        #expect(ranking.first?.q == 2)
+        #expect(ranking.first?.count == 3)
+        #expect(ranking.map { $0.q } == [2, 1, 3])
+    }
+
+    @Test func questionErrorNamesListsWhoMissed() {
+        let recs = [
+            StudentRecord(name: "小明", wrong: [1, 2], total: 5),
+            StudentRecord(name: "小華", wrong: [2], total: 5),
+            StudentRecord(name: "小美", wrong: [], total: 5),
+        ]
+        let byQ = AnswerLogic.questionErrorNames(recs)
+        #expect(byQ.map { $0.q } == [1, 2])           // 依題號升冪、無 Q3（無人錯）
+        #expect(byQ.first { $0.q == 1 }?.names == ["小明"])
+        #expect(byQ.first { $0.q == 2 }?.names == ["小明", "小華"])
+    }
+
+    @Test func questionErrorNamesUsesEnglishName() {
+        let recs = [
+            StudentRecord(name: "陳妤萱/Alina/高中第九回", wrong: [1], total: 5),
+            StudentRecord(name: "王小明/高中第九回", wrong: [1], total: 5),   // 無英文名 → 留中文
+        ]
+        let byQ = AnswerLogic.questionErrorNames(recs)
+        #expect(byQ.first { $0.q == 1 }?.names == ["Alina", "王小明"])
+    }
+
+    @Test func statsTextContainsSections() {
+        let recs = [
+            StudentRecord(name: "小明", wrong: [1, 2], total: 5),
+            StudentRecord(name: "小華", wrong: [2], total: 5),
+        ]
+        let text = AnswerLogic.buildStatsText(setName: "第九回", records: recs)
+        #expect(text.contains("已記錄：2 位"))
+        #expect(text.contains("各題錯誤名單"))
+        #expect(text.contains("第 2 題（2 人）：小明, 小華"))
+        #expect(text.contains("每位學生錯題"))
+    }
+
+    @Test func legacyAnswerSetDecodesWithoutRecords() throws {
+        // 舊版 JSON 沒有 records 欄位，需能解碼且 records 為空
+        let json = #"{"id":"11111111-1111-1111-1111-111111111111","name":"預設","choiceKey":["A","B"]}"#
+        let set = try JSONDecoder().decode(AnswerSet.self, from: Data(json.utf8))
+        #expect(set.name == "預設")
+        #expect(set.choiceKey == ["A", "B"])
+        #expect(set.records.isEmpty)
+    }
+
+    // MARK: 起始題號
+
+    @Test func evaluateRespectsStartQuestion() {
+        let key = makeKey([1: "A", 51: "B"])
+        let sub = AnswerLogic.parseStudentSubmission("生\n51 B", key: key, startQuestion: 51)
+        let e = AnswerLogic.evaluate(submission: sub, key: key, startQuestion: 51)
+        #expect(e.total == 1)          // 只算第 51 題，Q1 被忽略
+        #expect(e.wrong.isEmpty)
+        #expect(e.skipped.isEmpty)
+    }
+
+    @Test func startQuestionAvoidsFalseSkipped() {
+        // key 誤填了 Q1、Q2（前段殘留），以及正式的 Q51
+        let key = makeKey([1: "A", 2: "B", 51: "C"])
+        // 學生只答第 51 題
+        let sub = AnswerLogic.parseStudentSubmission("生\n51 C", key: key, startQuestion: 51)
+        let result = AnswerLogic.buildResultText(submission: sub, key: key, startQuestion: 51)
+        #expect(result.contains("得分：1/1"))
+        #expect(!result.contains("缺答"))   // Q1、Q2 不應被算成缺答
+    }
+
+    @Test func autoQSeededFromStartQuestion() {
+        let key = makeKey([51: "A", 52: "B", 53: "C", 54: "D"])
+        // 無題號行，應從起始題號 51 接續
+        let sub = AnswerLogic.parseStudentSubmission("生\nABCD", key: key, startQuestion: 51)
+        #expect(sub.answers[51] == "A")
+        #expect(sub.answers[54] == "D")
+        #expect(AnswerLogic.buildResultText(submission: sub, key: key, startQuestion: 51).contains("得分：4/4"))
     }
 
     // MARK: 真實案例回歸 — 第九回 40 題（含複選）
