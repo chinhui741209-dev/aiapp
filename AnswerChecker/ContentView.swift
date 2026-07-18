@@ -991,7 +991,7 @@ enum AnswerLogic {
             out.append("（全部答對，無錯題）")
         } else {
             for item in byQuestion {
-                out.append("第 \(item.q) 題（\(item.names.count) 人）：\(item.names.joined(separator: ", "))")
+                out.append("\(item.q)：\(item.names.joined(separator: ", "))")
             }
         }
 

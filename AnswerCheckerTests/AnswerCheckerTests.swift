@@ -214,7 +214,7 @@ struct AnswerCheckerTests {
         let text = AnswerLogic.buildStatsText(setName: "第九回", records: recs)
         #expect(text.contains("已記錄：2 位"))
         #expect(text.contains("各題錯誤名單"))
-        #expect(text.contains("第 2 題（2 人）：小明, 小華"))
+        #expect(text.contains("2：小明, 小華"))
         #expect(text.contains("每位學生錯題"))
     }
 
