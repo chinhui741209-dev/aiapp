@@ -206,6 +206,13 @@ struct AnswerCheckerTests {
         #expect(byQ.first { $0.q == 1 }?.names == ["Alina", "王小明"])
     }
 
+    @Test func displayNameStripsBrackets() {
+        // 表頭開頭帶括號（如貼上的作答表頭）→ 去除
+        #expect(AnswerLogic.displayName(from: "(Chris/多益 黃本 L4(1-61題)") == "Chris")
+        #expect(AnswerLogic.displayName(from: "(Ada/林棠清/多益 黃本 L4(1-61題)") == "Ada")
+        #expect(AnswerLogic.displayName(from: "（林棠清/科目") == "林棠清")
+    }
+
     @Test func statsTextContainsSections() {
         let recs = [
             StudentRecord(name: "小明", wrong: [1, 2], total: 5),

@@ -955,10 +955,11 @@ enum AnswerLogic {
         let fields = trimmed.split(separator: "/")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        if let english = fields.first(where: { $0.contains(where: { $0.isASCII && $0.isLetter }) }) {
-            return english
-        }
-        return fields.first ?? trimmed
+        let picked = fields.first(where: { $0.contains(where: { $0.isASCII && $0.isLetter }) })
+            ?? fields.first ?? trimmed
+        // 去除名字前後的括號 / 方括號等雜字元（例如表頭 "(Chris" → "Chris"）
+        let cleaned = picked.trimmingCharacters(in: CharacterSet(charactersIn: "()（）[]【】 "))
+        return cleaned.isEmpty ? "（未命名）" : cleaned
     }
 
     /// 各題錯誤學生名單；依題號升冪，只含至少 1 人錯的題，名字維持 records 既有順序。
